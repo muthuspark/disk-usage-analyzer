@@ -167,12 +167,14 @@ impl Analyzer {
                     .items_center()
                     .flex_1()
                     .min_w_0()
+                    .overflow_hidden()
                     .pl(px(if root { 4. } else { 4. + depth as f32 * 14. }))
                     .when(!root, |s| {
                         s.child(
                             div()
                                 .id(SharedString::from(format!("expand-{toggle_path:?}")))
                                 .w(px(18.))
+                                .flex_shrink_0()
                                 .text_color(rgb(theme::EMPHASIS))
                                 .child(if expandable {
                                     if expanded { "▾" } else { "▸" }
@@ -190,6 +192,7 @@ impl Analyzer {
                         .child(
                             div()
                                 .w(px(39.))
+                                .flex_shrink_0()
                                 .mr(px(6.))
                                 .bg(rgb(theme::SURFACE))
                                 .relative()
@@ -213,8 +216,8 @@ impl Analyzer {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
+                            .line_clamp(1)
+                            .whitespace_normal()
                             .text_ellipsis()
                             .text_color(rgb(if node.restricted {
                                 theme::RED
@@ -232,6 +235,7 @@ impl Analyzer {
             .child(
                 div()
                     .w(px(SIZE_COLUMN))
+                    .flex_shrink_0()
                     .text_right()
                     .pr(px(8.))
                     .child(if pending {
@@ -242,17 +246,25 @@ impl Analyzer {
                         model::format_size(node.bytes)
                     }),
             )
-            .child(div().w(px(CONTENTS_COLUMN)).child(if pending {
-                "…".into()
-            } else if node.restricted {
-                "—".into()
-            } else {
-                format!("{} items", node.items)
-            }))
+            .child(
+                div()
+                    .w(px(CONTENTS_COLUMN))
+                    .flex_shrink_0()
+                    .text_right()
+                    .pr(px(8.))
+                    .child(if pending {
+                        "…".into()
+                    } else if node.restricted {
+                        "—".into()
+                    } else {
+                        format!("{} items", node.items)
+                    }),
+            )
             .child(
                 div()
                     .w(px(MODIFIED_COLUMN))
-                    .pr(px(4.))
+                    .flex_shrink_0()
+                    .pr(px(8.))
                     .text_right()
                     .child(node.modified),
             )
@@ -465,6 +477,8 @@ impl Render for Analyzer {
                     .child(
                         div()
                             .w(relative(0.5))
+                            .min_w(px(420.))
+                            .flex_shrink_0()
                             .h_full()
                             .flex()
                             .flex_col()
@@ -485,19 +499,36 @@ impl Render for Analyzer {
                                         div()
                                             .id("sort")
                                             .w(px(SIZE_COLUMN))
+                                            .flex_shrink_0()
                                             .cursor_pointer()
-                                            .child(if self.descending {
-                                                "Size    ▾"
-                                            } else {
-                                                "Size    ▴"
-                                            })
+                                            .flex()
+                                            .items_center()
+                                            .justify_end()
+                                            .gap(px(6.))
+                                            .pr(px(8.))
+                                            .child("Size")
+                                            .child(if self.descending { "▾" } else { "▴" })
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.descending = !this.descending;
                                                 cx.notify();
                                             })),
                                     )
-                                    .child(div().w(px(CONTENTS_COLUMN)).child("Contents"))
-                                    .child(div().w(px(MODIFIED_COLUMN)).child("Modified")),
+                                    .child(
+                                        div()
+                                            .w(px(CONTENTS_COLUMN))
+                                            .flex_shrink_0()
+                                            .text_right()
+                                            .pr(px(8.))
+                                            .child("Contents"),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(MODIFIED_COLUMN))
+                                            .flex_shrink_0()
+                                            .text_right()
+                                            .pr(px(8.))
+                                            .child("Modified"),
+                                    ),
                             )
                             .child(
                                 uniform_list(
@@ -536,6 +567,8 @@ impl Render for Analyzer {
                             .child(
                                 div()
                                     .id("chart")
+                                    .bg(rgb(theme::CHART_BACKGROUND))
+                                    .text_color(rgb(theme::TEXT))
                                     .flex_1()
                                     .min_h_0()
                                     .relative()
