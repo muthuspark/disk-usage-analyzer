@@ -1,4 +1,4 @@
-use crate::{model::Node, theme};
+use crate::model::Node;
 use gpui::{Bounds, Path, PathBuilder, Pixels, Point, Window, point, px, rgb};
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -150,9 +150,9 @@ pub fn hit(
         .map(|s| s.path)
 }
 
-// Muted categorical colors for a white canvas; red remains an error color in the UI.
+// Saturated branch colors, with darker descendants rather than pale tints.
 const COLORS: [u32; 8] = [
-    0x548a8b, 0x668fb2, 0x8d83ab, 0x8b9f76, 0xb49b65, 0xb98970, 0xa57f97, 0x8c9da8,
+    0xe01b24, 0xe09508, 0x59a846, 0x249b83, 0x2875b5, 0x6651aa, 0xa33291, 0xd45a17,
 ];
 
 fn splits_colors(node: &Node, depth: usize) -> bool {
@@ -176,12 +176,8 @@ fn branch_color(parent: u32, index: usize, split: bool) -> u32 {
 }
 
 fn shade(color: u32, level: usize) -> u32 {
-    let tint = level as f32 * 0.035;
-    let c = |shift: u32| {
-        let accent = ((color >> shift) & 255u32) as f32;
-        let paper = ((theme::CHART_BACKGROUND >> shift) & 255u32) as f32;
-        (accent * (1. - tint) + paper * tint) as u32
-    };
+    let brightness = 1. - level as f32 * 0.05;
+    let c = |shift: u32| (((color >> shift) & 255u32) as f32 * brightness) as u32;
     c(16) << 16 | c(8) << 8 | c(0)
 }
 
