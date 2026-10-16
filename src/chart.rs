@@ -127,7 +127,7 @@ impl Segment {
 pub fn layout(node: &Node, bounds: Bounds<Pixels>, treemap: bool) -> Vec<Segment> {
     let mut segments = vec![];
     if treemap {
-        rectangles(node, bounds, vec![], 0, &mut segments);
+        rectangles(node, bounds, vec![], 0, 0, &mut segments);
     } else {
         let center = bounds.center();
         let radius = f32::from(bounds.size.width.min(bounds.size.height)) / 2. - 5.;
@@ -150,22 +150,36 @@ pub fn hit(
         .map(|s| s.path)
 }
 
+// Muted categorical colors for a white canvas; red remains an error color in the UI.
 const COLORS: [u32; 8] = [
-    theme::RED,
-    theme::BLUE,
-    theme::VIOLET,
-    theme::GREEN,
-    theme::CYAN,
-    theme::MAGENTA,
-    theme::YELLOW,
-    theme::ORANGE,
+    0x548a8b, 0x668fb2, 0x8d83ab, 0x8b9f76, 0xb49b65, 0xb98970, 0xa57f97, 0x8c9da8,
 ];
 
+fn splits_colors(node: &Node, depth: usize) -> bool {
+    depth == 0
+        || (depth <= 2
+            && node
+                .children
+                .iter()
+                .filter(|child| child.bytes > node.bytes / 100)
+                .take(2)
+                .count()
+                == 2)
+}
+
+fn branch_color(parent: u32, index: usize, split: bool) -> u32 {
+    if split {
+        COLORS[index % COLORS.len()]
+    } else {
+        parent
+    }
+}
+
 fn shade(color: u32, level: usize) -> u32 {
-    let tint = level as f32 * 0.07;
+    let tint = level as f32 * 0.035;
     let c = |shift: u32| {
         let accent = ((color >> shift) & 255u32) as f32;
-        let paper = ((theme::BACKGROUND >> shift) & 255u32) as f32;
+        let paper = ((theme::CHART_BACKGROUND >> shift) & 255u32) as f32;
         (accent * (1. - tint) + paper * tint) as u32
     };
     c(16) << 16 | c(8) << 8 | c(0)
@@ -189,6 +203,7 @@ fn rings(
     let hole = radius / 6.;
     let width = (radius - hole) / 5.;
     let mut angle = start;
+    let split_colors = splits_colors(node, depth);
     for (i, child) in node.children.iter().enumerate() {
         let sweep = (end - start) * child.bytes as f32 / node.bytes as f32;
         if sweep < 0.001 {
@@ -197,15 +212,7 @@ fn rings(
         let mut child_path = path.clone();
         child_path.push(i);
         let gap = 0.0015_f32.min(sweep * 0.15);
-        let base = if depth == 0 {
-            COLORS[i % COLORS.len()]
-        } else if path.first() == Some(&0) && depth == 1 {
-            [theme::RED, theme::GREEN, theme::CYAN, theme::VIOLET][i % 4]
-        } else if path.first() == Some(&1) && depth == 1 {
-            [theme::BLUE, theme::VIOLET, theme::MAGENTA, theme::ORANGE][i % 4]
-        } else {
-            color
-        };
+        let base = branch_color(color, i, split_colors);
         segments.push(Segment {
             path: child_path.clone(),
             color: shade(base, depth),
@@ -237,6 +244,7 @@ fn rectangles(
     bounds: Bounds<Pixels>,
     path: Vec<usize>,
     depth: usize,
+    color: u32,
     segments: &mut Vec<Segment>,
 ) {
     if node.bytes == 0 || depth > 3 {
@@ -244,6 +252,7 @@ fn rectangles(
     }
     let horizontal = bounds.size.width > bounds.size.height;
     let mut offset = 0.;
+    let split_colors = splits_colors(node, depth);
     for (i, child) in node.children.iter().enumerate() {
         let fraction = child.bytes as f32 / node.bytes as f32;
         if fraction < 0.001 {
@@ -263,13 +272,14 @@ fn rectangles(
         b.origin += point(px(1.), px(1.));
         b.size.width -= px(2.);
         b.size.height -= px(2.);
+        let base = branch_color(color, i, split_colors);
         segments.push(Segment {
-            color: shade(COLORS[child_path[0] % COLORS.len()], depth),
+            color: shade(base, depth),
             path: child_path.clone(),
             shape: Shape::Rect(b),
         });
         if b.size.width > px(16.) && b.size.height > px(16.) {
-            rectangles(child, b, child_path, depth + 1, segments);
+            rectangles(child, b, child_path, depth + 1, base, segments);
         }
     }
 }
