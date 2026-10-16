@@ -4,6 +4,8 @@ A native Rust desktop app built with GPUI. Shows disk usage as a folder tree,
 rings chart, or treemap. Every launch performs a fresh scan with up to eight
 workers; scan results are never saved.
 
+![Disk Usage Analyzer showing folder sizes and a rings chart](assets/screenshot.png)
+
 Requires Rust, Linux with Vulkan, and development libraries for FreeType,
 fontconfig, Wayland, xkbcommon, and xkbcommon-x11.
 
