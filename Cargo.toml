@@ -1,0 +1,20 @@
+[package]
+name = "disk-usage-analyzer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui = "=0.2.2"
+rayon = "1.12"
+# GPUI's xattr 0.2 dependency requires the ENOATTR alias removed in newer libc.
+libc = "=0.2.186"
+
+[profile.dev]
+debug = 0
+
+# Optimize the scanner and app without rebuilding GPUI's dependencies in release mode.
+[profile.dev.package.disk-usage-analyzer]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
