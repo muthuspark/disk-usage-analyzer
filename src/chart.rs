@@ -1,6 +1,7 @@
-use crate::model::Node;
-use gpui::{Bounds, PathBuilder, Pixels, Point, Window, point, px, rgb};
+use crate::{model::Node, theme};
+use gpui::{Bounds, Path, PathBuilder, Pixels, Point, Window, point, px, rgb};
 use std::f32::consts::TAU;
+use std::sync::Arc;
 
 pub struct Segment {
     path: Vec<usize>,
@@ -19,8 +20,54 @@ enum Shape {
     Rect(Bounds<Pixels>),
 }
 
+/// Drawing state for the current view only. New scans always provide a new tree.
+#[derive(Default)]
+pub struct Drawing {
+    node: Option<Node>,
+    bounds: Bounds<Pixels>,
+    treemap: bool,
+    segments: Vec<Segment>,
+    paths: Vec<(Path<Pixels>, u32)>,
+}
+
+impl Drawing {
+    pub fn update(&mut self, node: &Node, bounds: Bounds<Pixels>, treemap: bool) -> bool {
+        if self.node.as_ref().is_some_and(|previous| {
+            Arc::ptr_eq(&previous.children, &node.children) && previous.bytes == node.bytes
+        }) && self.bounds == bounds
+            && self.treemap == treemap
+        {
+            return false;
+        }
+        self.segments = layout(node, bounds, treemap);
+        self.paths = self
+            .segments
+            .iter()
+            .filter_map(|segment| segment.build_path().map(|path| (path, segment.color)))
+            .collect();
+        self.node = Some(node.clone());
+        self.bounds = bounds;
+        self.treemap = treemap;
+        true
+    }
+
+    pub fn paint(&self, window: &mut Window) {
+        for (path, color) in &self.paths {
+            window.paint_path(path.clone(), rgb(*color));
+        }
+    }
+
+    pub fn hit(&self, position: Point<Pixels>) -> Option<&[usize]> {
+        self.segments
+            .iter()
+            .rev()
+            .find(|s| s.contains(position))
+            .map(|s| s.path.as_slice())
+    }
+}
+
 impl Segment {
-    pub fn paint(self, window: &mut Window) {
+    fn build_path(&self) -> Option<Path<Pixels>> {
         let mut builder = PathBuilder::fill();
         match self.shape {
             Shape::Ring {
@@ -54,9 +101,7 @@ impl Segment {
             }
         }
         builder.close();
-        if let Ok(path) = builder.build() {
-            window.paint_path(path, rgb(self.color));
-        }
+        builder.build().ok()
     }
 
     fn contains(&self, p: Point<Pixels>) -> bool {
@@ -91,6 +136,7 @@ pub fn layout(node: &Node, bounds: Bounds<Pixels>, treemap: bool) -> Vec<Segment
     segments
 }
 
+#[cfg(test)]
 pub fn hit(
     node: &Node,
     bounds: Bounds<Pixels>,
@@ -105,12 +151,23 @@ pub fn hit(
 }
 
 const COLORS: [u32; 8] = [
-    0xe01b24, 0x4676d5, 0x9141ac, 0x26a269, 0x2b98af, 0xc53b76, 0x6860bb, 0x3584b5,
+    theme::RED,
+    theme::BLUE,
+    theme::VIOLET,
+    theme::GREEN,
+    theme::CYAN,
+    theme::MAGENTA,
+    theme::YELLOW,
+    theme::ORANGE,
 ];
 
 fn shade(color: u32, level: usize) -> u32 {
-    let factor = 1. - level as f32 * 0.065;
-    let c = |shift: u32| (((color >> shift) & 255u32) as f32 * factor) as u32;
+    let tint = level as f32 * 0.07;
+    let c = |shift: u32| {
+        let accent = ((color >> shift) & 255u32) as f32;
+        let paper = ((theme::BACKGROUND >> shift) & 255u32) as f32;
+        (accent * (1. - tint) + paper * tint) as u32
+    };
     c(16) << 16 | c(8) << 8 | c(0)
 }
 
@@ -143,9 +200,9 @@ fn rings(
         let base = if depth == 0 {
             COLORS[i % COLORS.len()]
         } else if path.first() == Some(&0) && depth == 1 {
-            [0xe01b24, 0x27b46e, 0x2b98af, 0x7653b5][i % 4]
+            [theme::RED, theme::GREEN, theme::CYAN, theme::VIOLET][i % 4]
         } else if path.first() == Some(&1) && depth == 1 {
-            [0x4676d5, 0x7653b5, 0x9141ac, 0xc53b76][i % 4]
+            [theme::BLUE, theme::VIOLET, theme::MAGENTA, theme::ORANGE][i % 4]
         } else {
             color
         };
@@ -271,5 +328,44 @@ mod tests {
         let node = root.at(&[4]);
         assert!(layout(node, bounds(), false).is_empty());
         assert!(layout(node, bounds(), true).is_empty());
+    }
+
+    #[test]
+    fn drawing_reuses_geometry_until_the_view_or_scan_changes() {
+        let root = model::demo();
+        let mut drawing = Drawing::default();
+        assert!(drawing.update(&root, bounds(), false));
+        let paths = drawing.paths.as_ptr();
+        for _ in 0..100 {
+            assert!(!drawing.update(&root.clone(), bounds(), false));
+            assert_eq!(drawing.paths.as_ptr(), paths);
+        }
+        let mut resized = bounds();
+        resized.size.width += px(20.);
+        assert!(drawing.update(&root, resized, false));
+        assert!(drawing.update(&root, resized, true));
+        assert!(drawing.update(root.at(&[0]), resized, true));
+        assert!(drawing.update(&root, resized, true));
+        let mut fresh_scan = root.clone();
+        fresh_scan.children = Arc::new(root.children.as_ref().clone());
+        assert!(drawing.update(&fresh_scan, resized, true));
+    }
+
+    #[test]
+    fn drawing_hit_testing_matches_the_rendered_slices() {
+        let root = model::demo();
+        let mut drawing = Drawing::default();
+        for treemap in [false, true] {
+            drawing.update(&root, bounds(), treemap);
+            for y in (50..650).step_by(17) {
+                for x in (450..900).step_by(17) {
+                    let p = point(px(x as f32), px(y as f32));
+                    assert_eq!(
+                        drawing.hit(p).map(<[usize]>::to_vec),
+                        hit(&root, bounds(), treemap, p)
+                    );
+                }
+            }
+        }
     }
 }

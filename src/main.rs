@@ -1,11 +1,12 @@
 mod chart;
 mod model;
 mod scan;
+mod theme;
 
 use gpui::{prelude::*, *};
 use model::Node;
 use std::{
-    cell::Cell,
+    cell::RefCell,
     collections::HashSet,
     path::PathBuf,
     rc::Rc,
@@ -13,17 +14,22 @@ use std::{
     time::Duration,
 };
 
-const PANEL: u32 = 0x202020;
-const BORDER: u32 = 0x3b3b3b;
+const BODY_SIZE: f32 = 13.;
+const SIZE_COLUMN: f32 = 83.;
+const CONTENTS_COLUMN: f32 = 120.;
+const MODIFIED_COLUMN: f32 = 80.;
 
 struct Analyzer {
+    font_family: SharedString,
     root: Node,
     path: Vec<usize>,
     expanded: HashSet<Vec<usize>>,
     descending: bool,
     treemap: bool,
     hovered: Option<(String, String)>,
-    chart_bounds: Rc<Cell<Bounds<Pixels>>>,
+    chart_drawing: Rc<RefCell<chart::Drawing>>,
+    list_scroll: UniformListScrollHandle,
+    list_path: Vec<usize>,
     scan_root: PathBuf,
     progress: Arc<scan::Progress>,
     scanning: bool,
@@ -38,6 +44,8 @@ impl Analyzer {
         self.scanning = true;
         self.status = format!("Scanning {}…", self.scan_root.display());
         self.path.clear();
+        self.list_scroll
+            .scroll_to_item_strict(0, ScrollStrategy::Top);
         self.expanded.clear();
         self.hovered = None;
         let label = self.root.name.clone();
@@ -138,12 +146,14 @@ impl Analyzer {
         };
         div()
             .id(SharedString::from(format!("row-{path:?}-{root}")))
+            .w_full()
             .flex()
             .items_center()
-            .h(px(27.))
-            .text_size(px(14.))
+            .h(px(28.))
+            .text_size(px(BODY_SIZE))
+            .whitespace_nowrap()
             .cursor_pointer()
-            .hover(|s| s.bg(rgb(0x303030)))
+            .hover(|s| s.bg(rgb(theme::SURFACE)))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if expandable && !root {
                     this.path = path.clone();
@@ -163,7 +173,7 @@ impl Analyzer {
                             div()
                                 .id(SharedString::from(format!("expand-{toggle_path:?}")))
                                 .w(px(18.))
-                                .text_color(rgb(0xb9b9b9))
+                                .text_color(rgb(theme::EMPHASIS))
                                 .child(if expandable {
                                     if expanded { "▾" } else { "▸" }
                                 } else {
@@ -181,14 +191,14 @@ impl Analyzer {
                             div()
                                 .w(px(39.))
                                 .mr(px(6.))
-                                .bg(rgb(0x343434))
+                                .bg(rgb(theme::SURFACE))
                                 .relative()
                                 .child(
                                     div()
                                         .absolute()
                                         .h_full()
                                         .w(px(39. * percent as f32 / 100.))
-                                        .bg(rgb(0x3584e4)),
+                                        .bg(rgba((theme::BLUE << 8) | 0x38)),
                                 )
                                 .child(
                                     div()
@@ -201,20 +211,38 @@ impl Analyzer {
                     })
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .overflow_hidden()
-                            .text_color(rgb(if node.restricted { 0xff6347 } else { 0xf2df39 }))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_color(rgb(if node.restricted {
+                                theme::RED
+                            } else {
+                                theme::EMPHASIS
+                            }))
+                            .font_weight(if root {
+                                FontWeight::BOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
                             .child(node.name),
                     ),
             )
-            .child(div().w(px(83.)).text_right().pr(px(8.)).child(if pending {
-                "…".into()
-            } else if node.restricted {
-                "—".into()
-            } else {
-                model::format_size(node.bytes)
-            }))
-            .child(div().w(px(109.)).child(if pending {
+            .child(
+                div()
+                    .w(px(SIZE_COLUMN))
+                    .text_right()
+                    .pr(px(8.))
+                    .child(if pending {
+                        "…".into()
+                    } else if node.restricted {
+                        "—".into()
+                    } else {
+                        model::format_size(node.bytes)
+                    }),
+            )
+            .child(div().w(px(CONTENTS_COLUMN)).child(if pending {
                 "…".into()
             } else if node.restricted {
                 "—".into()
@@ -223,7 +251,7 @@ impl Analyzer {
             }))
             .child(
                 div()
-                    .w(px(70.))
+                    .w(px(MODIFIED_COLUMN))
                     .pr(px(4.))
                     .text_right()
                     .child(node.modified),
@@ -244,9 +272,9 @@ impl Analyzer {
             .h(px(46.))
             .px(px(10.))
             .flex_shrink_0()
-            .bg(rgb(0x303030))
+            .bg(rgb(theme::SURFACE))
             .border_b_1()
-            .border_color(rgb(BORDER))
+            .border_color(rgb(theme::BORDER))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             .child(
                 button("back", "‹")
@@ -263,8 +291,8 @@ impl Analyzer {
                     .items_center()
                     .rounded(px(5.))
                     .border_1()
-                    .border_color(rgb(0x505050))
-                    .bg(rgb(0x242424))
+                    .border_color(rgb(theme::BORDER))
+                    .bg(rgb(theme::BACKGROUND))
                     .child(
                         div()
                             .id("breadcrumbs")
@@ -284,7 +312,7 @@ impl Analyzer {
                                             s.child(
                                                 div()
                                                     .px(px(3.))
-                                                    .text_color(rgb(0x929292))
+                                                    .text_color(rgb(theme::EMPHASIS))
                                                     .child("/"),
                                             )
                                         })
@@ -297,10 +325,10 @@ impl Analyzer {
                                                 .flex()
                                                 .items_center()
                                                 .px(px(10.))
-                                                .bg(rgb(0x3a3a3a))
-                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .bg(rgb(theme::SURFACE))
+                                                .font_weight(FontWeight::BOLD)
                                                 .cursor_pointer()
-                                                .hover(|s| s.bg(rgb(0x505050)))
+                                                .hover(|s| s.bg(rgba((theme::BLUE << 8) | 0x1f)))
                                                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                                     cx.stop_propagation()
                                                 })
@@ -324,19 +352,19 @@ impl Analyzer {
             )
             .child(
                 button("minimize", "−")
-                    .bg(rgb(0x454545))
+                    .bg(rgb(theme::BACKGROUND))
                     .rounded_full()
                     .on_click(|_, w, _| w.minimize_window()),
             )
             .child(
                 button("maximize", "□")
-                    .bg(rgb(0x454545))
+                    .bg(rgb(theme::BACKGROUND))
                     .rounded_full()
                     .on_click(|_, w, _| w.zoom_window()),
             )
             .child(
                 button("close", "×")
-                    .bg(rgb(0x454545))
+                    .bg(rgb(theme::BACKGROUND))
                     .rounded_full()
                     .on_click(|_, _, cx| cx.quit()),
             )
@@ -353,27 +381,69 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
         .rounded(px(4.))
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .hover(|s| s.bg(rgb(0x575757)))
+        .hover(|s| {
+            s.bg(rgba((theme::BLUE << 8) | 0x1f))
+                .text_color(rgb(theme::EMPHASIS))
+        })
         .child(label)
+}
+
+fn ui_monospace(cx: &App) -> SharedString {
+    let installed = cx.text_system().all_font_names();
+    // GPUI expects a concrete family name, rather than CSS's `ui-monospace` keyword.
+    #[cfg(target_os = "linux")]
+    if let Ok(output) = std::process::Command::new("fc-match")
+        .args(["--format=%{family}", "monospace"])
+        .output()
+        && output.status.success()
+    {
+        let families = String::from_utf8_lossy(&output.stdout);
+        if let Some(family) = families
+            .split(',')
+            .map(str::trim)
+            .find(|family| installed.iter().any(|name| name == family))
+        {
+            return family.to_owned().into();
+        }
+    }
+    [
+        "SF Mono",
+        "Menlo",
+        "Consolas",
+        "DejaVu Sans Mono",
+        "Liberation Mono",
+        "Noto Sans Mono",
+        "Courier New",
+    ]
+    .into_iter()
+    .find(|family| installed.iter().any(|name| name == family))
+    .unwrap_or(".SystemUIFont")
+    .into()
 }
 
 impl Render for Analyzer {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current().clone();
-        let mut rows = vec![];
+        if self.list_path != self.path {
+            self.list_scroll
+                .scroll_to_item_strict(0, ScrollStrategy::Top);
+            self.list_path = self.path.clone();
+        }
+        let mut rows = vec![(self.path.clone(), 0, current.clone())];
         self.rows(self.path.clone(), 0, &mut rows);
         let chart_node = current.clone();
-        let chart_bounds = self.chart_bounds.clone();
+        let drawing_for_layout = self.chart_drawing.clone();
+        let drawing_for_paint = self.chart_drawing.clone();
         let treemap = self.treemap;
         let path = self.path.clone();
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(PANEL))
-            .text_color(rgb(0xeeeeee))
-            .text_size(px(14.))
-            .font_family("Cantarell")
+            .bg(rgb(theme::BACKGROUND))
+            .text_color(rgb(theme::TEXT))
+            .text_size(px(BODY_SIZE))
+            .font_family(self.font_family.clone())
             .child(self.toolbar(cx))
             .child(
                 div()
@@ -383,8 +453,8 @@ impl Render for Analyzer {
                     .items_center()
                     .px(px(8.))
                     .text_size(px(11.))
-                    .text_color(rgb(0xb6b6b6))
-                    .bg(rgb(0x292929))
+                    .text_color(rgb(theme::EMPHASIS))
+                    .bg(rgb(theme::SURFACE))
                     .child(self.status.clone()),
             )
             .child(
@@ -399,22 +469,22 @@ impl Render for Analyzer {
                             .flex()
                             .flex_col()
                             .border_r_1()
-                            .border_color(rgb(BORDER))
+                            .border_color(rgb(theme::BORDER))
                             .child(
                                 div()
                                     .h(px(31.))
                                     .flex_shrink_0()
                                     .flex()
                                     .items_center()
-                                    .text_size(px(12.))
-                                    .text_color(rgb(0x929292))
+                                    .text_size(px(11.))
+                                    .text_color(rgb(theme::EMPHASIS))
                                     .border_b_1()
-                                    .border_color(rgb(BORDER))
+                                    .border_color(rgb(theme::BORDER))
                                     .child(div().flex_1().pl(px(4.)).child("Folder"))
                                     .child(
                                         div()
                                             .id("sort")
-                                            .w(px(83.))
+                                            .w(px(SIZE_COLUMN))
                                             .cursor_pointer()
                                             .child(if self.descending {
                                                 "Size    ▾"
@@ -426,24 +496,34 @@ impl Render for Analyzer {
                                                 cx.notify();
                                             })),
                                     )
-                                    .child(div().w(px(109.)).child("Contents"))
-                                    .child(div().w(px(70.)).child("Modified")),
+                                    .child(div().w(px(CONTENTS_COLUMN)).child("Contents"))
+                                    .child(div().w(px(MODIFIED_COLUMN)).child("Modified")),
                             )
                             .child(
-                                div()
-                                    .id("folder-list")
-                                    .flex_1()
-                                    .overflow_y_scroll()
-                                    .child(self.row(
-                                        current.clone(),
-                                        self.path.clone(),
-                                        0,
-                                        true,
-                                        cx,
-                                    ))
-                                    .children(rows.into_iter().map(|(path, depth, node)| {
-                                        self.row(node, path, depth, false, cx)
-                                    })),
+                                uniform_list(
+                                    "folder-list",
+                                    rows.len(),
+                                    cx.processor(
+                                        move |this, range: std::ops::Range<usize>, _, cx| {
+                                            range
+                                                .map(|i| {
+                                                    let (path, depth, node) = &rows[i];
+                                                    this.row(
+                                                        node.clone(),
+                                                        path.clone(),
+                                                        *depth,
+                                                        i == 0,
+                                                        cx,
+                                                    )
+                                                })
+                                                .collect::<Vec<_>>()
+                                        },
+                                    ),
+                                )
+                                .track_scroll(self.list_scroll.clone())
+                                .flex_1()
+                                .min_h_0()
+                                .w_full(),
                             ),
                     )
                     .child(
@@ -452,7 +532,7 @@ impl Render for Analyzer {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .bg(rgb(0x242424))
+                            .bg(rgb(theme::BACKGROUND))
                             .child(
                                 div()
                                     .id("chart")
@@ -462,13 +542,14 @@ impl Render for Analyzer {
                                     .child(
                                         canvas(
                                             move |bounds, _, _| {
-                                                chart_bounds.set(bounds);
-                                                chart::layout(&chart_node, bounds, treemap)
+                                                drawing_for_layout.borrow_mut().update(
+                                                    &chart_node,
+                                                    bounds,
+                                                    treemap,
+                                                );
                                             },
-                                            |_, segments, window, _| {
-                                                for segment in segments {
-                                                    segment.paint(window);
-                                                }
+                                            move |_, _, window, _| {
+                                                drawing_for_paint.borrow().paint(window);
                                             },
                                         )
                                         .size_full(),
@@ -506,17 +587,14 @@ impl Render for Analyzer {
                                     })
                                     .on_mouse_move(cx.listener(
                                         move |this, event: &MouseMoveEvent, _, cx| {
-                                            let bounds = this.chart_bounds.get();
-                                            let hit = chart::hit(
-                                                this.current(),
-                                                bounds,
-                                                this.treemap,
-                                                event.position,
-                                            )
-                                            .map(|p| {
-                                                let n = this.current().at(&p);
-                                                (n.name.clone(), model::format_size(n.bytes))
-                                            });
+                                            let hit = this
+                                                .chart_drawing
+                                                .borrow()
+                                                .hit(event.position)
+                                                .map(|p| {
+                                                    let n = this.current().at(p);
+                                                    (n.name.clone(), model::format_size(n.bytes))
+                                                });
                                             if this.hovered != hit {
                                                 this.hovered = hit;
                                                 cx.notify();
@@ -526,13 +604,13 @@ impl Render for Analyzer {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                            let bounds = this.chart_bounds.get();
-                                            if let Some(p) = chart::hit(
-                                                this.current(),
-                                                bounds,
-                                                this.treemap,
-                                                event.position,
-                                            ) && !this.current().at(&p).children.is_empty()
+                                            let hit = this
+                                                .chart_drawing
+                                                .borrow()
+                                                .hit(event.position)
+                                                .map(<[usize]>::to_vec);
+                                            if let Some(p) = hit
+                                                && !this.current().at(&p).children.is_empty()
                                             {
                                                 this.path = [path.clone(), p].concat();
                                                 this.hovered = None;
@@ -549,13 +627,13 @@ impl Render for Analyzer {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .bg(rgb(0x303030))
+                                    .bg(rgb(theme::SURFACE))
                                     .child(
                                         div()
                                             .absolute()
                                             .left(px(10.))
                                             .text_size(px(11.))
-                                            .text_color(rgb(0xababab))
+                                            .text_color(rgb(theme::EMPHASIS))
                                             .child(
                                                 self.hovered
                                                     .as_ref()
@@ -568,11 +646,14 @@ impl Render for Analyzer {
                                             .flex()
                                             .rounded(px(7.))
                                             .overflow_hidden()
-                                            .bg(rgb(0x444444))
+                                            .bg(rgb(theme::SURFACE))
                                             .child(
                                                 button("rings", "◉")
                                                     .size(px(34.))
-                                                    .when(!treemap, |s| s.bg(rgb(0x737373)))
+                                                    .when(!treemap, |s| {
+                                                        s.bg(rgb(theme::BLUE))
+                                                            .text_color(rgb(theme::BACKGROUND))
+                                                    })
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.treemap = false;
                                                         this.hovered = None;
@@ -582,7 +663,10 @@ impl Render for Analyzer {
                                             .child(
                                                 button("treemap", "▥")
                                                     .size(px(34.))
-                                                    .when(treemap, |s| s.bg(rgb(0x737373)))
+                                                    .when(treemap, |s| {
+                                                        s.bg(rgb(theme::BLUE))
+                                                            .text_color(rgb(theme::BACKGROUND))
+                                                    })
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.treemap = true;
                                                         this.hovered = None;
@@ -658,6 +742,7 @@ fn main() {
         return;
     }
     Application::new().run(move |cx| {
+        let font_family = ui_monospace(cx);
         let bounds = Bounds::centered(None, size(px(906.), px(698.)), cx);
         cx.open_window(
             WindowOptions {
@@ -670,13 +755,16 @@ fn main() {
             |_, cx| {
                 cx.new(|cx| {
                     let mut analyzer = Analyzer {
+                        font_family,
                         root: Node::empty(label),
                         path: vec![],
                         expanded: HashSet::new(),
                         descending: true,
                         treemap: false,
                         hovered: None,
-                        chart_bounds: Rc::new(Cell::new(Bounds::default())),
+                        chart_drawing: Rc::new(RefCell::new(chart::Drawing::default())),
+                        list_scroll: UniformListScrollHandle::new(),
+                        list_path: vec![],
                         scan_root,
                         progress: Arc::new(scan::Progress::default()),
                         scanning: false,
